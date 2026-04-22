@@ -110,7 +110,6 @@ DATABASES = {
     'default': dj_database_url.config(
         default=config('DATABASE_URL', default='postgresql://foodsorderings_user:k2nFVOqJuIWn9zTWPnzrd8oXkazbzWrT@dpg-d7kca99j2pic739geng0-a/foodsorderings'),
         conn_max_age=600,
-        ssl_require=config('DB_SSL', default=True, cast=bool),
     )
 }
 
