@@ -13,9 +13,8 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 import os
 from pathlib import Path
 from datetime import timedelta
-from dotenv import load_dotenv
-
-load_dotenv()
+from decouple import config
+import dj_database_url
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,11 +24,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-x(^6($apr$g(4s_t+6it6_rosz6d#rz*m=vukd!aa9r+3-re85')
+SECRET_KEY = config('SECRET_KEY', default='django-insecure-x(^6($apr$g(4s_t+6it6_rosz6d#rz*m=vukd!aa9r+3-re85')
 
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = ['192.168.1.8','192.168.1.11','192.168.1.25','192.168.1.31','localhost','127.0.0.1','192.168.1.1','192.168.55.254','192.168.55.139']
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,192.168.1.11').split(',')
 
 
 # Application definition
@@ -67,6 +66,7 @@ SIMPLE_JWT = {
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -107,14 +107,11 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': os.getenv('DB_ENGINE', 'django.db.backends.postgresql'),
-        'NAME': os.getenv('DB_NAME', 'foodsorderings'),
-        'USER': os.getenv('DB_USER', 'postgres'),
-        'PASSWORD': os.getenv('DB_PASSWORD', 'postgre'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
-    }
+    'default': dj_database_url.config(
+        default=config('DATABASE_URL', default='postgresql://foodsorderings_user:k2nFVOqJuIWn9zTWPnzrd8oXkazbzWrT@dpg-d7kca99j2pic739geng0-a/foodsorderings'),
+        conn_max_age=600,
+        ssl_require=config('DB_SSL', default=True, cast=bool),
+    )
 }
 
 # Password validation
@@ -152,12 +149,14 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
 
 AUTH_USER_MODEL = 'accounts.User'
 
-GOOGLE_MAPS_API_KEY = os.getenv('GOOGLE_MAPS_API_KEY')
-PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY', '')
-PAYMONGO_PUBLIC_KEY = os.getenv('PAYMONGO_PUBLIC_KEY', '')
+GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
+PAYMONGO_SECRET_KEY = config('PAYMONGO_SECRET_KEY', default='')
+PAYMONGO_PUBLIC_KEY = config('PAYMONGO_PUBLIC_KEY', default='')
