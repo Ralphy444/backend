@@ -1,0 +1,13 @@
+{% extends "admin/base.html" %}
+
+{% block userlinks %}
+    {% if user.is_authenticated %}
+        <strong style="color: #fff;">{{ user.username }}</strong> |
+        <form method="post" action="{% url 'admin:logout' %}" style="display: inline;">
+            {% csrf_token %}
+            <button type="submit" style="background: #ba2121; color: white; border: none; padding: 8px 15px; border-radius: 4px; cursor: pointer; font-size: 13px; font-weight: bold;">
+                🚪 Logout
+            </button>
+        </form>
+    {% endif %}
+{% endblock %}
