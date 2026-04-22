@@ -28,7 +28,7 @@ SECRET_KEY = config('SECRET_KEY', default='django-insecure-x(^6($apr$g(4s_t+6it6
 
 DEBUG = config('DEBUG', default=False, cast=bool)
 
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,192.168.1.11').split(',')
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,192.168.1.11,.onrender.com').split(',')
 
 
 # Application definition
@@ -110,6 +110,7 @@ DATABASES = {
     'default': dj_database_url.config(
         default=config('DATABASE_URL', default='postgresql://foodsorderings_user:k2nFVOqJuIWn9zTWPnzrd8oXkazbzWrT@dpg-d7kca99j2pic739geng0-a/foodsorderings'),
         conn_max_age=600,
+        ssl_require=config('DB_SSL', default=True, cast=bool),
     )
 }
 
