@@ -19,9 +19,7 @@ class MenuItemSerializer(serializers.ModelSerializer):
 
     def get_image_url(self, obj):
         if obj.image:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
         return None
 
     def get_addons(self, obj):
@@ -56,9 +54,7 @@ class RestaurantSerializer(serializers.ModelSerializer):
 
     def get_image_url(self, obj):
         if obj.image:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
         return None
 
     def get_avg_rating(self, obj):
@@ -106,9 +102,7 @@ class OrderSerializer(serializers.ModelSerializer):
 
     def get_delivery_proof_url(self, obj):
         if obj.delivery_proof:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.delivery_proof.url)
+            return obj.delivery_proof.url
         return None
 
     def get_delivery_rider_info(self, obj):

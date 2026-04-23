@@ -40,27 +40,6 @@ class Restaurant(models.Model):
     def __str__(self):
         return self.name
 
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        if self.image:
-            self._resize_image()
-
-    def _resize_image(self):
-        try:
-            from PIL import Image as PilImage, ImageOps
-            import os
-            img_path = self.image.path
-            img = PilImage.open(img_path).convert('RGBA')
-            # Pad to square with white background
-            size = max(img.width, img.height)
-            bg = PilImage.new('RGBA', (size, size), (255, 255, 255, 255))
-            offset = ((size - img.width) // 2, (size - img.height) // 2)
-            bg.paste(img, offset, mask=img)
-            # Resize to fixed 400x400
-            bg = bg.resize((400, 400), PilImage.LANCZOS).convert('RGB')
-            bg.save(img_path, 'JPEG', quality=90)
-        except Exception:
-            pass
     @property
     def is_open(self):
         if not self.is_active:
@@ -100,23 +79,6 @@ class MenuItem(models.Model):
 
     def __str__(self):
         return f"{self.restaurant.name} - {self.name}"
-
-    def save(self, *args, **kwargs):
-        super().save(*args, **kwargs)
-        if self.image:
-            self._resize_image()
-
-    def _resize_image(self):
-        try:
-            from PIL import Image as PilImage
-            img_path = self.image.path
-            img = PilImage.open(img_path).convert('RGBA')
-            size = max(img.width, img.height)
-            bg = PilImage.new('RGBA', (size, size), (255, 255, 255, 255))
-            bg.paste(img, ((size - img.width) // 2, (size - img.height) // 2), mask=img)
-            bg.resize((400, 400), PilImage.LANCZOS).convert('RGB').save(img_path, 'JPEG', quality=90)
-        except Exception:
-            pass
 
     @property
     def in_stock(self):

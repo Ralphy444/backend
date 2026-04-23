@@ -4,9 +4,73 @@ from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
+from django.core.mail import send_mail
+from django.conf import settings
 from .models import User
 from .serializers import RegisterSerializer, UserSerializer
 from stores.models import Restaurant
+
+
+def send_welcome_email(user):
+    if not user.email:
+        return
+    try:
+        if user.user_type == 'delivery':
+            subject = '🛵 Rider Registration Received — Pending Approval'
+            message = (
+                f'Hi {user.first_name or user.username},\n\n'
+                f'Thank you for registering as a delivery rider on FoodOrdering!\n\n'
+                f'Your account is currently under review. You will receive another email once your account has been approved by our admin.\n\n'
+                f'Account Details:\n'
+                f'  Username: {user.username}\n'
+                f'  Name: {user.get_full_name() or "—"}\n'
+                f'  Phone: {user.phone or "—"}\n\n'
+                f'Thank you for your patience!\n\n'
+                f'— FoodOrdering Team'
+            )
+        else:
+            subject = '🎉 Welcome to FoodOrdering!'
+            message = (
+                f'Hi {user.first_name or user.username},\n\n'
+                f'Welcome to FoodOrdering! Your account has been created successfully.\n\n'
+                f'Account Details:\n'
+                f'  Username: {user.username}\n'
+                f'  Email: {user.email}\n\n'
+                f'You can now start ordering your favorite food!\n\n'
+                f'— FoodOrdering Team'
+            )
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
+
+
+def send_login_notification(user):
+    if not user.email:
+        return
+    try:
+        from django.utils import timezone
+        now = timezone.localtime(timezone.now()).strftime('%B %d, %Y at %I:%M %p')
+        send_mail(
+            subject='🔐 New Login to Your FoodOrdering Account',
+            message=(
+                f'Hi {user.first_name or user.username},\n\n'
+                f'A new login was detected on your FoodOrdering account.\n\n'
+                f'  Time: {now} (Manila Time)\n\n'
+                f'If this was not you, please change your password immediately.\n\n'
+                f'— FoodOrdering Team'
+            ),
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=True,
+        )
+    except Exception:
+        pass
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -37,6 +101,8 @@ def register(request):
         if user.user_type == 'delivery':
             user.is_active = False
             user.save()
+        # Send welcome email
+        send_welcome_email(user)
         if 'motorcycle_photo' in request.FILES:
             user.motorcycle_photo = request.FILES['motorcycle_photo']
             user.save()
@@ -92,6 +158,8 @@ def login(request):
 
     if user:
         user.reset_failed_login()
+        # Send login notification email
+        send_login_notification(user)
         refresh = RefreshToken.for_user(user)
         response_data = {
             'user': {
