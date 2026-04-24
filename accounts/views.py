@@ -5,30 +5,40 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
+from django.core.cache import cache
 from django.conf import settings
 from .models import User
 from .serializers import RegisterSerializer, UserSerializer
 from stores.models import Restaurant
+import random
+import json
 
 
-def send_otp_email(user, otp):
+def generate_otp():
+    return str(random.randint(100000, 999999))
+
+
+def send_otp_email(email, otp, name=''):
+    """Send OTP via Brevo SMTP — returns True if sent, False if failed."""
     try:
         send_mail(
-            subject='🔐 Your OrderBites Verification Code',
+            subject='\U0001f510 Your OrderBites Verification Code',
             message=(
-                f'Hi {user.first_name or user.username},\n\n'
+                f'Hi {name or "there"},\n\n'
                 f'Your email verification code is:\n\n'
-                f'  {otp}\n\n'
+                f'        {otp}\n\n'
                 f'This code expires in 10 minutes.\n'
                 f'Do not share this code with anyone.\n\n'
-                f'— OrderBites Team'
+                f'\u2014 OrderBites Team'
             ),
             from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[user.email],
+            recipient_list=[email],
             fail_silently=False,
         )
+        return True
     except Exception as e:
-        print(f'OTP email error: {e}')
+        print(f'[OTP EMAIL ERROR] {e}')
+        return False
 
 
 def send_welcome_email(user):
@@ -36,20 +46,20 @@ def send_welcome_email(user):
         return
     try:
         if user.user_type == 'delivery':
-            subject = '🛵 Rider Registration Received — Pending Approval'
+            subject = '\U0001f6f5 Rider Application Received \u2014 Pending Approval'
             message = (
                 f'Hi {user.first_name or user.username},\n\n'
                 f'Thank you for registering as a delivery rider on OrderBites!\n\n'
-                f'Your account is currently under review. You will receive another email once approved.\n\n'
-                f'— OrderBites Team'
+                f'Your application is under review. We will notify you once approved.\n\n'
+                f'\u2014 OrderBites Team'
             )
         else:
-            subject = '🎉 Welcome to OrderBites!'
+            subject = '\U0001f389 Welcome to OrderBites!'
             message = (
                 f'Hi {user.first_name or user.username},\n\n'
-                f'Welcome to OrderBites! Your account has been verified and activated.\n\n'
-                f'You can now start ordering your favorite food!\n\n'
-                f'— OrderBites Team'
+                f'Your account has been verified and activated!\n\n'
+                f'You can now start ordering your favorite food.\n\n'
+                f'\u2014 OrderBites Team'
             )
         send_mail(
             subject=subject,
@@ -69,13 +79,13 @@ def send_login_notification(user):
         from django.utils import timezone
         now = timezone.localtime(timezone.now()).strftime('%B %d, %Y at %I:%M %p')
         send_mail(
-            subject='🔐 New Login to Your OrderBites Account',
+            subject='\U0001f510 New Login to Your OrderBites Account',
             message=(
                 f'Hi {user.first_name or user.username},\n\n'
-                f'A new login was detected on your OrderBites account.\n\n'
-                f'  Time: {now} (Manila Time)\n\n'
-                f'If this was not you, please change your password immediately.\n\n'
-                f'— OrderBites Team'
+                f'A new login was detected on your account.\n'
+                f'Time: {now} (Manila Time)\n\n'
+                f'If this was not you, change your password immediately.\n\n'
+                f'\u2014 OrderBites Team'
             ),
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
@@ -88,22 +98,141 @@ def send_login_notification(user):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
+    """
+    Step 1: Validate data, send OTP, store pending data in cache.
+    User is NOT saved to DB yet.
+    """
+    user_type = request.data.get('user_type', 'customer')
+
+    # Validate via serializer (does NOT save)
     serializer = RegisterSerializer(data=request.data)
-    if serializer.is_valid():
-        user_type = request.data.get('user_type', 'customer')
-        if user_type == 'delivery':
-            phone = request.data.get('phone', '').strip()
-            plate = request.data.get('plate_number', '').strip()
-            if phone and User.objects.filter(user_type='delivery', phone=phone).exists():
-                return Response({'error': 'A rider with this phone number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
-            if plate and User.objects.filter(user_type='delivery', plate_number__iexact=plate).exists():
-                return Response({'error': 'A rider with this plate number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+    email = serializer.validated_data.get('email', '')
+    username = serializer.validated_data.get('username', '')
+
+    # Check duplicates
+    if User.objects.filter(username__iexact=username).exists():
+        return Response({'error': 'Username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+    if email and User.objects.filter(email__iexact=email).exists():
+        return Response({'error': 'Email already registered.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if user_type == 'delivery':
+        phone = request.data.get('phone', '').strip()
+        plate = request.data.get('plate_number', '').strip()
+        if phone and User.objects.filter(user_type='delivery', phone=phone).exists():
+            return Response({'error': 'A rider with this phone number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+        if plate and User.objects.filter(user_type='delivery', plate_number__iexact=plate).exists():
+            return Response({'error': 'A rider with this plate number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # For delivery riders — save immediately (needs admin approval anyway)
+    if user_type == 'delivery':
         user = serializer.save()
-
-        # Save lat/lng
         lat = request.data.get('latitude')
         lng = request.data.get('longitude')
+        if lat and lng:
+            try:
+                from decimal import Decimal
+                user.latitude = round(Decimal(str(lat)), 6)
+                user.longitude = round(Decimal(str(lng)), 6)
+            except Exception:
+                pass
+        user.is_active = False
+        user.is_email_verified = True
+        user.save()
+        for field in ['motorcycle_photo', 'license_photo', 'face_left', 'face_front', 'face_right']:
+            if field in request.FILES:
+                setattr(user, field, request.FILES[field])
+        user.save()
+        send_welcome_email(user)
+        return Response({
+            'message': 'Rider application submitted! Please wait for admin approval.',
+        }, status=status.HTTP_201_CREATED)
+
+    # For customers — store data in cache, send OTP, do NOT save to DB yet
+    otp = generate_otp()
+    cache_key = f'pending_reg_{username}'
+    cache_data = {
+        'otp': otp,
+        'validated_data': {
+            'username': username,
+            'email': email,
+            'password': request.data.get('password', ''),
+            'first_name': serializer.validated_data.get('first_name', ''),
+            'last_name': serializer.validated_data.get('last_name', ''),
+            'phone': serializer.validated_data.get('phone', ''),
+            'address': serializer.validated_data.get('address', ''),
+            'latitude': request.data.get('latitude', ''),
+            'longitude': request.data.get('longitude', ''),
+            'user_type': 'customer',
+        }
+    }
+    # Store in cache for 15 minutes
+    cache.set(cache_key, json.dumps(cache_data), timeout=900)
+
+    # Send OTP email
+    name = serializer.validated_data.get('first_name', '') or username
+    sent = send_otp_email(email, otp, name)
+    if not sent:
+        cache.delete(cache_key)
+        return Response(
+            {'error': 'Failed to send verification email. Please check your email address and try again.'},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
+
+    return Response({
+        'message': f'Verification code sent to {email}. Please check your inbox.',
+        'email': email,
+        'username': username,
+        'requires_otp': True,
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def verify_otp(request):
+    """
+    Step 2: Verify OTP, then create user in DB.
+    """
+    username = request.data.get('username', '').strip()
+    otp_input = request.data.get('otp', '').strip()
+
+    if not username or not otp_input:
+        return Response({'error': 'Username and OTP are required.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    cache_key = f'pending_reg_{username}'
+    cached = cache.get(cache_key)
+
+    if not cached:
+        return Response(
+            {'error': 'OTP expired or not found. Please register again.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    data = json.loads(cached)
+
+    if data['otp'] != otp_input:
+        return Response({'error': 'Invalid OTP. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # OTP correct — now create user in DB
+    vd = data['validated_data']
+    try:
+        user = User.objects.create_user(
+            username=vd['username'],
+            email=vd['email'],
+            password=vd['password'],
+            first_name=vd.get('first_name', ''),
+            last_name=vd.get('last_name', ''),
+            phone=vd.get('phone', ''),
+            address=vd.get('address', ''),
+            user_type='customer',
+            is_active=True,
+            is_email_verified=True,
+        )
+        # Save coordinates if present
+        lat = vd.get('latitude')
+        lng = vd.get('longitude')
         if lat and lng:
             try:
                 from decimal import Decimal
@@ -112,70 +241,18 @@ def register(request):
                 user.save(update_fields=['latitude', 'longitude'])
             except Exception:
                 pass
+    except Exception as e:
+        return Response({'error': f'Account creation failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Save photos
-        for field in ['motorcycle_photo', 'license_photo', 'face_left', 'face_front', 'face_right']:
-            if field in request.FILES:
-                setattr(user, field, request.FILES[field])
-        user.save()
+    # Clear cache
+    cache.delete(cache_key)
 
-        # Delivery riders — inactive until admin approves, send pending email
-        if user.user_type == 'delivery':
-            user.is_active = False
-            user.is_email_verified = True  # no OTP needed for riders
-            user.save()
-            send_welcome_email(user)
-            return Response({'message': 'Rider application submitted. Pending admin approval.'}, status=status.HTTP_201_CREATED)
-
-        # Customer — inactive until OTP verified, send OTP
-        user.is_active = False
-        user.is_email_verified = False
-        user.save()
-        otp = user.generate_otp()
-        send_otp_email(user, otp)
-
-        return Response({
-            'message': 'Registration successful! Please check your email for the verification code.',
-            'email': user.email,
-            'username': user.username,
-            'requires_otp': True,
-        }, status=status.HTTP_201_CREATED)
-
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
-
-@api_view(['POST'])
-@permission_classes([AllowAny])
-def verify_otp(request):
-    username = request.data.get('username', '').strip()
-    otp = request.data.get('otp', '').strip()
-
-    if not username or not otp:
-        return Response({'error': 'Username and OTP are required.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    try:
-        user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-
-    if user.is_email_verified:
-        return Response({'error': 'Email already verified. Please login.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if not user.verify_otp(otp):
-        return Response({'error': 'Invalid or expired OTP. Please request a new code.'}, status=status.HTTP_400_BAD_REQUEST)
-
-    # Activate account
-    user.is_active = True
-    user.is_email_verified = True
-    user.otp_code = ''
-    user.otp_expires_at = None
-    user.save()
-
+    # Send welcome email
     send_welcome_email(user)
 
     refresh = RefreshToken.for_user(user)
     return Response({
-        'message': 'Email verified! Welcome to OrderBites 🎉',
+        'message': 'Email verified! Welcome to OrderBites \U0001f389',
         'user': {
             'username': user.username,
             'email': user.email,
@@ -194,15 +271,27 @@ def resend_otp(request):
     username = request.data.get('username', '').strip()
     if not username:
         return Response({'error': 'Username is required.'}, status=status.HTTP_400_BAD_REQUEST)
-    try:
-        user = User.objects.get(username=username)
-    except User.DoesNotExist:
-        return Response({'error': 'User not found.'}, status=status.HTTP_404_NOT_FOUND)
-    if user.is_email_verified:
-        return Response({'error': 'Email already verified.'}, status=status.HTTP_400_BAD_REQUEST)
-    otp = user.generate_otp()
-    send_otp_email(user, otp)
-    return Response({'message': f'New OTP sent to {user.email}'})
+
+    cache_key = f'pending_reg_{username}'
+    cached = cache.get(cache_key)
+    if not cached:
+        return Response(
+            {'error': 'Registration session expired. Please register again.'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    data = json.loads(cached)
+    new_otp = generate_otp()
+    data['otp'] = new_otp
+    cache.set(cache_key, json.dumps(data), timeout=900)
+
+    email = data['validated_data']['email']
+    name = data['validated_data'].get('first_name', '') or username
+    sent = send_otp_email(email, new_otp, name)
+    if not sent:
+        return Response({'error': 'Failed to resend OTP. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({'message': f'New verification code sent to {email}.'})
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

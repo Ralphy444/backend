@@ -56,6 +56,14 @@ INSTALLED_APPS = [
     'stores',
 ]
 
+# Cache — used for pending OTP registrations
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
+        'LOCATION': 'otp_cache',
+    }
+}
+
 
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ( 
