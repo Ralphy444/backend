@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
+from smtplib import SMTPAuthenticationError
 
 
 def get_sender_email():
@@ -19,12 +20,25 @@ def send_text_email(subject, message, recipient_list, fail_silently=False):
     if not recipients:
         raise ValueError('At least one recipient email is required.')
 
-    connection = get_connection(fail_silently=fail_silently)
     email = EmailMultiAlternatives(
         subject=subject,
         body=message,
         from_email=get_sender_email(),
         to=recipients,
-        connection=connection,
     )
-    return email.send()
+
+    try:
+        connection = get_connection(fail_silently=fail_silently)
+        email.connection = connection
+        return email.send()
+    except SMTPAuthenticationError as exc:
+        api_key = getattr(settings, 'BREVO_API_KEY', '').strip()
+        if not api_key:
+            raise exc
+
+        fallback_connection = get_connection(
+            backend='accounts.brevo_backend.BrevoEmailBackend',
+            fail_silently=fail_silently,
+        )
+        email.connection = fallback_connection
+        return email.send()

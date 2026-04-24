@@ -212,6 +212,7 @@ CLOUDINARY_STORAGE = {
 
 # Email - use Brevo SMTP when MAILER_SMTP_* is configured, otherwise keep REST fallback.
 MAILER_SMTP_HOST = config('MAILER_SMTP_HOST', default='').strip()
+BREVO_API_KEY = config('BREVO_API_KEY', default='')
 if MAILER_SMTP_HOST:
     EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
     EMAIL_HOST = MAILER_SMTP_HOST
@@ -223,7 +224,6 @@ if MAILER_SMTP_HOST:
     EMAIL_TIMEOUT = config('MAILER_SMTP_TIMEOUT', default=20, cast=int)
 else:
     EMAIL_BACKEND = 'accounts.brevo_backend.BrevoEmailBackend'
-    BREVO_API_KEY = config('BREVO_API_KEY', default='')
 
 DEFAULT_FROM_EMAIL = config(
     'DEFAULT_FROM_EMAIL',
