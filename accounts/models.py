@@ -2,6 +2,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
 from datetime import timedelta
+import random
 
 class User(AbstractUser):
     USER_TYPE_CHOICES = [
@@ -19,6 +20,9 @@ class User(AbstractUser):
     profile_picture = models.ImageField(upload_to='profiles/', null=True, blank=True)
     failed_login_attempts = models.IntegerField(default=0)
     account_locked_until = models.DateTimeField(null=True, blank=True)
+    is_email_verified = models.BooleanField(default=False)
+    otp_code = models.CharField(max_length=6, blank=True)
+    otp_expires_at = models.DateTimeField(null=True, blank=True)
     
     # Delivery Rider specific fields
     motorcycle_color = models.CharField(max_length=50, blank=True)
@@ -34,6 +38,19 @@ class User(AbstractUser):
     def __str__(self):
         return f"{self.username} - {self.get_full_name() or self.email}"
     
+    def generate_otp(self):
+        self.otp_code = str(random.randint(100000, 999999))
+        self.otp_expires_at = timezone.now() + timedelta(minutes=10)
+        self.save(update_fields=['otp_code', 'otp_expires_at'])
+        return self.otp_code
+
+    def verify_otp(self, code):
+        if not self.otp_code or not self.otp_expires_at:
+            return False
+        if timezone.now() > self.otp_expires_at:
+            return False
+        return self.otp_code == str(code)
+
     def is_account_locked(self):
         if self.account_locked_until and timezone.now() < self.account_locked_until:
             return True
