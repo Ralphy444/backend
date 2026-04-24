@@ -15,6 +15,7 @@ def clean_coordinate(value):
 
 class RegisterSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
+    email = serializers.EmailField(required=True)
     user_type = serializers.ChoiceField(choices=[('customer', 'Customer'), ('delivery', 'Delivery Rider')], default='customer')
     username = serializers.CharField(max_length=150)
     latitude = serializers.CharField(required=False, allow_blank=True, allow_null=True)

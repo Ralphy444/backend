@@ -1,17 +1,20 @@
+import json
+import random
+
+from django.contrib.auth import authenticate
+from django.core.cache import cache
+from django.core.mail import send_mail
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
-from django.core.mail import send_mail
-from django.core.cache import cache
-from django.conf import settings
+
+from stores.models import Restaurant
+
+from .email_utils import send_text_email
 from .models import User
 from .serializers import RegisterSerializer, UserSerializer
-from stores.models import Restaurant
-import random
-import json
 
 
 def generate_otp():
@@ -19,9 +22,12 @@ def generate_otp():
 
 
 def send_otp_email(email, otp, name=''):
-    """Send OTP via Brevo API — returns (success: bool, error_msg: str)."""
+    """Send OTP email and return (success: bool, error_msg: str)."""
     try:
-        result = send_mail(
+        if not email:
+            return (False, 'Recipient email is required.')
+
+        result = send_text_email(
             subject='\U0001f510 Your OrderBites Verification Code',
             message=(
                 f'Hi {name or "there"},\n\n'
@@ -31,12 +37,11 @@ def send_otp_email(email, otp, name=''):
                 f'Do not share this code with anyone.\n\n'
                 f'\u2014 OrderBites Team'
             ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[email],
             fail_silently=False,
         )
         if result == 0:
-            return (False, 'Email backend returned 0 (not sent). Check BREVO_API_KEY in environment variables.')
+            return (False, 'Email backend returned 0 (not sent). Check your Brevo SMTP configuration.')
         return (True, '')
     except Exception as e:
         error_msg = f'{type(e).__name__}: {str(e)}'
@@ -67,7 +72,6 @@ def send_welcome_email(user):
         send_mail(
             subject=subject,
             message=message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=True,
         )
@@ -80,6 +84,7 @@ def send_login_notification(user):
         return
     try:
         from django.utils import timezone
+
         now = timezone.localtime(timezone.now()).strftime('%B %d, %Y at %I:%M %p')
         send_mail(
             subject='\U0001f510 New Login to Your OrderBites Account',
@@ -90,7 +95,6 @@ def send_login_notification(user):
                 f'If this was not you, change your password immediately.\n\n'
                 f'\u2014 OrderBites Team'
             ),
-            from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=True,
         )
@@ -107,15 +111,13 @@ def register(request):
     """
     user_type = request.data.get('user_type', 'customer')
 
-    # Validate via serializer (does NOT save)
     serializer = RegisterSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    email = serializer.validated_data.get('email', '')
-    username = serializer.validated_data.get('username', '')
+    email = serializer.validated_data.get('email', '').strip()
+    username = serializer.validated_data.get('username', '').strip()
 
-    # Check duplicates
     if User.objects.filter(username__iexact=username).exists():
         return Response({'error': 'Username already exists.'}, status=status.HTTP_400_BAD_REQUEST)
     if email and User.objects.filter(email__iexact=email).exists():
@@ -129,7 +131,6 @@ def register(request):
         if plate and User.objects.filter(user_type='delivery', plate_number__iexact=plate).exists():
             return Response({'error': 'A rider with this plate number already exists.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # For delivery riders — save immediately (needs admin approval anyway)
     if user_type == 'delivery':
         user = serializer.save()
         lat = request.data.get('latitude')
@@ -137,6 +138,7 @@ def register(request):
         if lat and lng:
             try:
                 from decimal import Decimal
+
                 user.latitude = round(Decimal(str(lat)), 6)
                 user.longitude = round(Decimal(str(lng)), 6)
             except Exception:
@@ -149,11 +151,11 @@ def register(request):
                 setattr(user, field, request.FILES[field])
         user.save()
         send_welcome_email(user)
-        return Response({
-            'message': 'Rider application submitted! Please wait for admin approval.',
-        }, status=status.HTTP_201_CREATED)
+        return Response(
+            {'message': 'Rider application submitted! Please wait for admin approval.'},
+            status=status.HTTP_201_CREATED,
+        )
 
-    # For customers — store data in cache, send OTP, do NOT save to DB yet
     otp = generate_otp()
     cache_key = f'pending_reg_{username}'
     cache_data = {
@@ -169,27 +171,28 @@ def register(request):
             'latitude': request.data.get('latitude', ''),
             'longitude': request.data.get('longitude', ''),
             'user_type': 'customer',
-        }
+        },
     }
-    # Store in cache for 15 minutes
     cache.set(cache_key, json.dumps(cache_data), timeout=900)
 
-    # Send OTP email
     name = serializer.validated_data.get('first_name', '') or username
     sent, err = send_otp_email(email, otp, name)
     if not sent:
         cache.delete(cache_key)
         return Response(
             {'error': f'Failed to send verification email: {err}. Please contact support.'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
-    return Response({
-        'message': f'Verification code sent to {email}. Please check your inbox.',
-        'email': email,
-        'username': username,
-        'requires_otp': True,
-    }, status=status.HTTP_200_OK)
+    return Response(
+        {
+            'message': f'Verification code sent to {email}. Please check your inbox.',
+            'email': email,
+            'username': username,
+            'requires_otp': True,
+        },
+        status=status.HTTP_200_OK,
+    )
 
 
 @api_view(['POST'])
@@ -210,7 +213,7 @@ def verify_otp(request):
     if not cached:
         return Response(
             {'error': 'OTP expired or not found. Please register again.'},
-            status=status.HTTP_400_BAD_REQUEST
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     data = json.loads(cached)
@@ -218,7 +221,6 @@ def verify_otp(request):
     if data['otp'] != otp_input:
         return Response({'error': 'Invalid OTP. Please try again.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # OTP correct — now create user in DB
     vd = data['validated_data']
     try:
         user = User.objects.create_user(
@@ -233,12 +235,12 @@ def verify_otp(request):
             is_active=True,
             is_email_verified=True,
         )
-        # Save coordinates if present
         lat = vd.get('latitude')
         lng = vd.get('longitude')
         if lat and lng:
             try:
                 from decimal import Decimal
+
                 user.latitude = round(Decimal(str(lat)), 6)
                 user.longitude = round(Decimal(str(lng)), 6)
                 user.save(update_fields=['latitude', 'longitude'])
@@ -247,25 +249,24 @@ def verify_otp(request):
     except Exception as e:
         return Response({'error': f'Account creation failed: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # Clear cache
     cache.delete(cache_key)
-
-    # Send welcome email
     send_welcome_email(user)
 
     refresh = RefreshToken.for_user(user)
-    return Response({
-        'message': 'Email verified! Welcome to OrderBites \U0001f389',
-        'user': {
-            'username': user.username,
-            'email': user.email,
-            'first_name': user.first_name,
-            'last_name': user.last_name,
-            'user_type': user.user_type,
-        },
-        'refresh': str(refresh),
-        'access': str(refresh.access_token),
-    })
+    return Response(
+        {
+            'message': 'Email verified! Welcome to OrderBites \U0001f389',
+            'user': {
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'user_type': user.user_type,
+            },
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+        }
+    )
 
 
 @api_view(['POST'])
@@ -280,7 +281,7 @@ def resend_otp(request):
     if not cached:
         return Response(
             {'error': 'Registration session expired. Please register again.'},
-            status=status.HTTP_400_BAD_REQUEST
+            status=status.HTTP_400_BAD_REQUEST,
         )
 
     data = json.loads(cached)
@@ -295,6 +296,7 @@ def resend_otp(request):
         return Response({'error': f'Failed to resend OTP: {err}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response({'message': f'New verification code sent to {email}.'})
+
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
@@ -312,12 +314,15 @@ def login(request):
         if not user_obj.is_active and user_obj.user_type == 'delivery':
             return Response({'error': 'Your account is pending approval. Please wait for admin review.'}, status=status.HTTP_401_UNAUTHORIZED)
         if not user_obj.is_active and not user_obj.is_email_verified:
-            return Response({
-                'error': 'Please verify your email first.',
-                'requires_otp': True,
-                'username': user_obj.username,
-                'email': user_obj.email,
-            }, status=status.HTTP_401_UNAUTHORIZED)
+            return Response(
+                {
+                    'error': 'Please verify your email first.',
+                    'requires_otp': True,
+                    'username': user_obj.username,
+                    'email': user_obj.email,
+                },
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
         if not user_obj.is_active:
             return Response({'error': 'Your account is inactive. Contact administrator.'}, status=status.HTTP_401_UNAUTHORIZED)
     except User.DoesNotExist:
@@ -327,7 +332,6 @@ def login(request):
 
     if user:
         user.reset_failed_login()
-        # Send login notification email
         send_login_notification(user)
         refresh = RefreshToken.for_user(user)
         response_data = {
@@ -339,7 +343,7 @@ def login(request):
                 'phone': user.phone,
                 'address': user.address,
                 'is_staff': user.is_staff,
-                'user_type': user.user_type
+                'user_type': user.user_type,
             },
             'refresh': str(refresh),
             'access': str(refresh.access_token),
@@ -360,6 +364,7 @@ def login(request):
 
     user_obj.increment_failed_login()
     return Response({'error': 'Your username or password is incorrect'}, status=status.HTTP_401_UNAUTHORIZED)
+
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -385,6 +390,7 @@ def create_store_admin(request):
     )
     return Response({'id': user.id, 'username': user.username, 'message': 'Store admin created successfully'}, status=status.HTTP_201_CREATED)
 
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def save_push_token(request):
@@ -394,11 +400,13 @@ def save_push_token(request):
         request.user.save(update_fields=['push_token'])
     return Response({'status': 'ok'})
 
+
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_profile(request):
     serializer = UserSerializer(request.user)
     return Response(serializer.data)
+
 
 @api_view(['PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])

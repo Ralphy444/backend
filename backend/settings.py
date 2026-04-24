@@ -10,11 +10,12 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
-import os
 from pathlib import Path
 from datetime import timedelta
+
 from decouple import config
 import dj_database_url
+import cloudinary
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -24,13 +25,16 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = config('SECRET_KEY', default='django-insecure-x(^6($apr$g(4s_t+6it6_rosz6d#rz*m=vukd!aa9r+3-re85')
+SECRET_KEY = config(
+    'SECRET_KEY',
+    default='django-insecure-x(^6($apr$g(4s_t+6it6_rosz6d#rz*m=vukd!aa9r+3-re85',
+)
 
 DEBUG = config('DEBUG', default=True, cast=lambda v: str(v).lower() in ('true', '1', 'yes'))
 
 ALLOWED_HOSTS = config(
     'ALLOWED_HOSTS',
-    default='localhost,127.0.0.1,backend-1-wp4k.onrender.com,.onrender.com'
+    default='localhost,127.0.0.1,backend-1-wp4k.onrender.com,.onrender.com',
 ).split(',')
 
 # Trust the Render proxy so HTTPS works correctly
@@ -56,7 +60,7 @@ INSTALLED_APPS = [
     'stores',
 ]
 
-# Cache — used for pending OTP registrations
+# Cache used for pending OTP registrations.
 CACHES = {
     'default': {
         'BACKEND': 'django.core.cache.backends.db.DatabaseCache',
@@ -66,7 +70,7 @@ CACHES = {
 
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ( 
+    'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ),
     'DEFAULT_PERMISSION_CLASSES': [
@@ -133,7 +137,10 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 
 DATABASES = {
     'default': dj_database_url.config(
-        default=config('DATABASE_URL', default='postgresql://foodsorderings_user:k2nFVOqJuIWn9zTWPnzrd8oXkazbzWrT@dpg-d7kca99j2pic739geng0-a/foodsorderings'),
+        default=config(
+            'DATABASE_URL',
+            default='postgresql://foodsorderings_user:k2nFVOqJuIWn9zTWPnzrd8oXkazbzWrT@dpg-d7kca99j2pic739geng0-a/foodsorderings',
+        ),
         conn_max_age=600,
         ssl_require=config('DB_SSL', default=True, cast=bool),
     )
@@ -189,8 +196,7 @@ GOOGLE_MAPS_API_KEY = config('GOOGLE_MAPS_API_KEY', default='')
 PAYMONGO_SECRET_KEY = config('PAYMONGO_SECRET_KEY', default='')
 PAYMONGO_PUBLIC_KEY = config('PAYMONGO_PUBLIC_KEY', default='')
 
-# Cloudinary — persistent media storage
-import cloudinary
+# Cloudinary - persistent media storage
 cloudinary.config(
     cloud_name=config('CLOUDINARY_CLOUD_NAME', default=''),
     api_key=config('CLOUDINARY_API_KEY', default=''),
@@ -204,7 +210,26 @@ CLOUDINARY_STORAGE = {
     'API_SECRET': config('CLOUDINARY_API_SECRET', default=''),
 }
 
-# Email — Brevo REST API
-EMAIL_BACKEND = 'accounts.brevo_backend.BrevoEmailBackend'
-BREVO_API_KEY = config('BREVO_API_KEY', default='')
-DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='OrderBites <a90db3001@smtp-brevo.com>')
+# Email - use Brevo SMTP when MAILER_SMTP_* is configured, otherwise keep REST fallback.
+MAILER_SMTP_HOST = config('MAILER_SMTP_HOST', default='').strip()
+if MAILER_SMTP_HOST:
+    EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+    EMAIL_HOST = MAILER_SMTP_HOST
+    EMAIL_PORT = config('MAILER_SMTP_PORT', default=587, cast=int)
+    EMAIL_USE_TLS = config('MAILER_SMTP_USE_TLS', default=True, cast=bool)
+    EMAIL_USE_SSL = config('MAILER_SMTP_USE_SSL', default=False, cast=bool)
+    EMAIL_HOST_USER = config('MAILER_SMTP_USER', default='').strip()
+    EMAIL_HOST_PASSWORD = config('MAILER_SMTP_PASSWORD', default='').strip()
+    EMAIL_TIMEOUT = config('MAILER_SMTP_TIMEOUT', default=20, cast=int)
+else:
+    EMAIL_BACKEND = 'accounts.brevo_backend.BrevoEmailBackend'
+    BREVO_API_KEY = config('BREVO_API_KEY', default='')
+
+DEFAULT_FROM_EMAIL = config(
+    'DEFAULT_FROM_EMAIL',
+    default=(
+        f'OrderBites <{EMAIL_HOST_USER}>'
+        if MAILER_SMTP_HOST and EMAIL_HOST_USER
+        else 'OrderBites <a90db3001@smtp-brevo.com>'
+    ),
+)

@@ -9,3 +9,17 @@ services:
         value: 3.12.0
       - key: DEBUG
         value: False
+      - key: MAILER_SMTP_HOST
+        value: smtp-relay.brevo.com
+      - key: MAILER_SMTP_PORT
+        value: 587
+      - key: MAILER_SMTP_USE_TLS
+        value: True
+      - key: MAILER_SMTP_USE_SSL
+        value: False
+      - key: MAILER_SMTP_USER
+        sync: false
+      - key: MAILER_SMTP_PASSWORD
+        sync: false
+      - key: DEFAULT_FROM_EMAIL
+        sync: false
