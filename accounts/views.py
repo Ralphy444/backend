@@ -19,9 +19,9 @@ def generate_otp():
 
 
 def send_otp_email(email, otp, name=''):
-    """Send OTP via Brevo SMTP — returns True if sent, False if failed."""
+    """Send OTP via Brevo API — returns (success: bool, error_msg: str)."""
     try:
-        send_mail(
+        result = send_mail(
             subject='\U0001f510 Your OrderBites Verification Code',
             message=(
                 f'Hi {name or "there"},\n\n'
@@ -35,10 +35,13 @@ def send_otp_email(email, otp, name=''):
             recipient_list=[email],
             fail_silently=False,
         )
-        return True
+        if result == 0:
+            return (False, 'Email backend returned 0 (not sent). Check BREVO_API_KEY in environment variables.')
+        return (True, '')
     except Exception as e:
-        print(f'[OTP EMAIL ERROR] {e}')
-        return False
+        error_msg = f'{type(e).__name__}: {str(e)}'
+        print(f'[OTP EMAIL ERROR] {error_msg}')
+        return (False, error_msg)
 
 
 def send_welcome_email(user):
@@ -173,11 +176,11 @@ def register(request):
 
     # Send OTP email
     name = serializer.validated_data.get('first_name', '') or username
-    sent = send_otp_email(email, otp, name)
+    sent, err = send_otp_email(email, otp, name)
     if not sent:
         cache.delete(cache_key)
         return Response(
-            {'error': 'Failed to send verification email. Please check your email address and try again.'},
+            {'error': f'Failed to send verification email: {err}. Please contact support.'},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
 
@@ -287,9 +290,9 @@ def resend_otp(request):
 
     email = data['validated_data']['email']
     name = data['validated_data'].get('first_name', '') or username
-    sent = send_otp_email(email, new_otp, name)
+    sent, err = send_otp_email(email, new_otp, name)
     if not sent:
-        return Response({'error': 'Failed to resend OTP. Please try again.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return Response({'error': f'Failed to resend OTP: {err}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     return Response({'message': f'New verification code sent to {email}.'})
 
