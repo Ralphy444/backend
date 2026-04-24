@@ -92,10 +92,11 @@ def register(request):
         lng = request.data.get('longitude')
         if lat and lng:
             try:
-                user.latitude = float(lat)
-                user.longitude = float(lng)
+                from decimal import Decimal
+                user.latitude = round(Decimal(str(lat)), 6)
+                user.longitude = round(Decimal(str(lng)), 6)
                 user.save(update_fields=['latitude', 'longitude'])
-            except (ValueError, TypeError):
+            except Exception:
                 pass
         # Delivery riders need admin approval before they can login
         if user.user_type == 'delivery':
