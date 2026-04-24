@@ -104,11 +104,68 @@ class UserAdmin(BaseUserAdmin):
     face_right_preview.short_description = '👉 Face Right'
 
     def approve_riders(self, request, queryset):
-        updated = queryset.filter(user_type='delivery').update(is_active=True)
-        self.message_user(request, f'{updated} rider(s) approved successfully.')
+        riders = queryset.filter(user_type='delivery', is_active=False)
+        count = 0
+        for rider in riders:
+            rider.is_active = True
+            rider.save()
+            # Send approval email
+            try:
+                from django.core.mail import send_mail
+                from django.conf import settings as django_settings
+                send_mail(
+                    subject='🛵 Your Rider Application is Approved!',
+                    message=(
+                        f'Hi {rider.first_name or rider.username},\n\n'
+                        f'Great news! Your delivery rider application for OrderBites has been APPROVED! 🎉\n\n'
+                        f'You can now log in to the app and start accepting deliveries.\n\n'
+                        f'Account Details:\n'
+                        f'  Username: {rider.username}\n'
+                        f'  Name: {rider.get_full_name() or "—"}\n\n'
+                        f'Welcome to the OrderBites Rider Team! 🛵\n\n'
+                        f'— OrderBites Team'
+                    ),
+                    from_email=django_settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[rider.email],
+                    fail_silently=True,
+                )
+                # Send push notification if rider has push token
+                if rider.push_token:
+                    from stores.views import send_push_notification
+                    send_push_notification(
+                        rider.push_token,
+                        '🛵 Application Approved!',
+                        'Your rider application has been approved! You can now log in and start delivering.'
+                    )
+            except Exception as e:
+                print(f'Approval notification error: {e}')
+            count += 1
+        self.message_user(request, f'{count} rider(s) approved and notified successfully.')
     approve_riders.short_description = '✓ Approve selected riders'
 
     def reject_riders(self, request, queryset):
-        updated = queryset.filter(user_type='delivery').update(is_active=False)
-        self.message_user(request, f'{updated} rider(s) rejected/deactivated.')
+        riders = queryset.filter(user_type='delivery')
+        count = 0
+        for rider in riders:
+            rider.is_active = False
+            rider.save()
+            try:
+                from django.core.mail import send_mail
+                from django.conf import settings as django_settings
+                send_mail(
+                    subject='❌ Your Rider Application Status',
+                    message=(
+                        f'Hi {rider.first_name or rider.username},\n\n'
+                        f'We regret to inform you that your delivery rider application for OrderBites has not been approved at this time.\n\n'
+                        f'If you believe this is a mistake or would like to reapply, please contact our support team.\n\n'
+                        f'— OrderBites Team'
+                    ),
+                    from_email=django_settings.DEFAULT_FROM_EMAIL,
+                    recipient_list=[rider.email],
+                    fail_silently=True,
+                )
+            except Exception:
+                pass
+            count += 1
+        self.message_user(request, f'{count} rider(s) rejected/deactivated.')
     reject_riders.short_description = '✗ Reject/Deactivate selected riders'
