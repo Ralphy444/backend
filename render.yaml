@@ -18,8 +18,8 @@ services:
       - key: MAILER_SMTP_USE_SSL
         value: False
       - key: MAILER_SMTP_USER
-        sync: false
+        value: a91efd001@smtp-brevo.com
       - key: MAILER_SMTP_PASSWORD
         sync: false
       - key: DEFAULT_FROM_EMAIL
-        sync: false
+        value: OrderBites <ralphyvillarojo0203@gmail.com>

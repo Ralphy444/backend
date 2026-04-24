@@ -55,6 +55,9 @@ def manage_restaurants(request):
         delivery_time=request.data.get('delivery_time', '30-45 mins'),
         admin=admin_user,
     )
+    if 'image' in request.FILES:
+        restaurant.image = request.FILES['image']
+        restaurant.save(update_fields=['image'])
     return Response(RestaurantSerializer(restaurant, context={'request': request}).data, status=status.HTTP_201_CREATED)
 
 @api_view(['GET'])
